@@ -1,4 +1,4 @@
-import React from "react";
+import { useState, useEffect } from "react";
 
 function getWeatherIcon(wmoCode) {
   const icons = new Map([
@@ -32,143 +32,126 @@ function formatDay(dateStr) {
   }).format(new Date(dateStr));
 }
 
-class App extends React.Component {
-  state = {
-    location: "",
-    isLoading: false,
-    displayLocation: "",
-    weather: {},
-  };
+function App() {
+  const [location, setLocation] = useState(
+    () => localStorage.getItem("location") || "",
+  );
+  const [isLoading, setIsLoading] = useState(false);
+  const [displayLocation, setDisplayLocation] = useState("");
+  const [weather, setWeather] = useState({});
 
-  //async fetchWeather() {
-  fetchWeather = async () => {
-    if (this.state.location.length < 2) return this.setState({ weather: {} });
-    try {
-      this.setState({ isLoading: true });
+  function handleLocationChange(e) {
+    setLocation(e.target.value);
+  }
 
-      const geoRes = await fetch(
-        `https://geocoding-api.open-meteo.com/v1/search?name=${this.state.location}`,
-      );
-      const geoData = await geoRes.json();
-      console.log(geoData);
+  useEffect(() => {
+    localStorage.setItem("location", location);
+  }, [location]);
 
-      if (!geoData.results) throw new Error("Location not found");
-
-      const { latitude, longitude, timezone, name, country_code } =
-        geoData.results.at(0);
-      this.setState({
-        displayLocation: `${name} ${convertToFlag(country_code)}`,
-      });
-
-      // 2) Getting actual weather
-      const weatherRes = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&timezone=${timezone}&daily=weathercode,temperature_2m_max,temperature_2m_min`,
-      );
-      const weatherData = await weatherRes.json();
-      this.setState({ weather: weatherData.daily });
-    } catch (err) {
-      console.error(err);
-    } finally {
-      this.setState({ isLoading: false });
+  useEffect(() => {
+    if (location.length < 2) {
+      return;
     }
-  };
+    const controller = new AbortController();
 
-  setLocation = (e) => this.setState({ location: e.target.value });
+    async function fetchWeather() {
+      try {
+        setIsLoading(true);
 
-  componentDidMount() {
-    // this.fetchWeather();
-    this.setState({ location: localStorage.getItem("location") || "" });
-  }
+        const geoRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${location}`,
+          { signal: controller.signal },
+        );
+        const geoData = await geoRes.json();
 
-  componentDidUpdate(prevProps, prevState) {
-    if (this.state.location !== prevState.location) {
-      this.fetchWeather("location", this.state.location);
+        if (!geoData.results) throw new Error("Location not found");
+
+        const { latitude, longitude, timezone, name, country_code } =
+          geoData.results.at(0);
+        setDisplayLocation(`${name} ${convertToFlag(country_code)}`);
+
+        // 2) Getting actual weather
+        const weatherRes = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&timezone=${timezone}&daily=weathercode,temperature_2m_max,temperature_2m_min`,
+          { signal: controller.signal },
+        );
+        const weatherData = await weatherRes.json();
+        setWeather(weatherData.daily);
+      } catch (err) {
+        if (err.name !== "AbortError") console.error(err);
+      } finally {
+        if (!controller.signal.aborted) setIsLoading(false);
+      }
     }
-  }
+    fetchWeather();
 
-  render() {
-    return (
-      <div className="app">
-        <h1>Classy Weather</h1>
-        <Input
-          location={this.state.location}
-          onChangeLocation={this.setLocation}
-        />
+    return () => controller.abort();
+  }, [location]);
 
-        {this.state.isLoading && <p className="loader"> Loading... </p>}
+  return (
+    <div className="app">
+      <h1>Classy Weather</h1>
+      <Input location={location} onChangeLocation={handleLocationChange} />
 
-        {this.state.weather.weathercode && (
-          <Weather
-            weather={this.state.weather}
-            location={this.state.location}
-          />
-        )}
-      </div>
-    );
-  }
+      {isLoading && <p className="loader"> Loading... </p>}
+
+      {location.length >= 2 && weather.weathercode && (
+        <Weather weather={weather} location={displayLocation} />
+      )}
+    </div>
+  );
 }
 
 export default App;
 
-class Input extends React.Component {
-  render() {
-    return (
-      <div>
-        <input
-          type="text"
-          placeholder="search from location.."
-          value={this.props.location}
-          onChange={this.props.onChangeLocation}
-        />
-      </div>
-    );
-  }
+function Input({ location, onChangeLocation }) {
+  return (
+    <div>
+      <input
+        type="text"
+        placeholder="search from location.."
+        value={location}
+        onChange={onChangeLocation}
+      />
+    </div>
+  );
 }
 
-class Weather extends React.Component {
-  componentWillUnmount() {}
-
-  render() {
-    const {
-      temperature_2m_max: max,
-      temperature_2m_min: min,
-      time: dates,
-      weathercode: codes,
-    } = this.props.weather;
-    return (
-      <div>
-        <h2>Weather {this.props.location}</h2>
-        <ul className="weather">
-          {dates.map((date, i) => {
-            return (
-              <Day
-                key={date}
-                date={date}
-                max={max[i]}
-                min={min[i]}
-                code={codes[i]}
-                isToday={i === 0}
-              />
-            );
-          })}
-        </ul>
-      </div>
-    );
-  }
+function Weather({ weather, location }) {
+  const {
+    temperature_2m_max: max,
+    temperature_2m_min: min,
+    time: dates,
+    weathercode: codes,
+  } = weather;
+  return (
+    <div>
+      <h2>Weather {location}</h2>
+      <ul className="weather">
+        {dates.map((date, i) => {
+          <Day
+            key={date}
+            date={date}
+            max={max[i]}
+            min={min[i]}
+            code={codes[i]}
+            isToday={i === 0}
+          />;
+        })}
+      </ul>
+    </div>
+  );
 }
 
-class Day extends React.Component {
-  render() {
-    const { date, max, min, code, isToday } = this.props;
-    return (
-      <li className="day">
-        <span>{getWeatherIcon(code)}</span>
-        <p>{isToday ? "Today" : formatDay(date)}</p>
-        <p>
-          {Math.floor(min)}&deg; &mdash; <strong>{Math.ceil(max)}&deg;</strong>
-        </p>
-        <p></p>
-      </li>
-    );
-  }
+function Day({ date, max, min, code, isToday }) {
+  return (
+    <li className="day">
+      <span>{getWeatherIcon(code)}</span>
+      <p>{isToday ? "Today" : formatDay(date)}</p>
+      <p>
+        {Math.floor(min)}&deg; &mdash; <strong>{Math.ceil(max)}&deg;</strong>
+      </p>
+      <p></p>
+    </li>
+  );
 }
